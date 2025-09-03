@@ -9,7 +9,6 @@ from jose import jwt
 import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 # Initialize app
 app = FastAPI(title="Task Manager")
@@ -17,13 +16,10 @@ app = FastAPI(title="Task Manager")
 # Path to frontend folder
 filepath_fe_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "frontend")
 
-# Serve static files (HTML, CSS, JS)
-app.mount("/static", StaticFiles(directory=os.path.join(filepath_fe_dir, "static")), name="static")
-
 # Serve index.html at root
 @app.get("/")
 def home():
-    return FileResponse(os.path.join(filepath_fe_dir, "index.html"))
+    return {"msg": "Task Manager Backend is running!"}
 
 # Enable CORS
 app.add_middleware(
