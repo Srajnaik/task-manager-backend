@@ -1,6 +1,3 @@
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
 from fastapi import FastAPI, Depends, HTTPException
 from sqlalchemy import create_engine, Column, Integer, String, Boolean, ForeignKey
 from sqlalchemy.ext.declarative import declarative_base
@@ -10,7 +7,10 @@ from passlib.context import CryptContext
 from datetime import datetime, timedelta
 from jose import jwt
 import os
-
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 # Initialize app
 app = FastAPI(title="Task Manager")
 
@@ -18,12 +18,12 @@ app = FastAPI(title="Task Manager")
 filepath_fe_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "frontend")
 
 # Serve static files (HTML, CSS, JS)
-app.mount("/static", StaticFiles(directory=filepath_fe_dir), name="static")
+app.mount("/static", StaticFiles(directory=os.path.join(filepath_fe_dir, "static")), name="static")
 
 # Serve index.html at root
 @app.get("/")
 def home():
-    return FileResponse(os.path.join(filepath_fe_dir, "Index.html"))
+    return FileResponse(os.path.join(filepath_fe_dir, "index.html"))
 
 # Enable CORS
 app.add_middleware(
