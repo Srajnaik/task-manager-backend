@@ -1,3 +1,5 @@
+from typing import List
+import os
 from fastapi import FastAPI, Depends, HTTPException
 from sqlalchemy import create_engine, Column, Integer, String, Boolean, ForeignKey
 from sqlalchemy.ext.declarative import declarative_base
@@ -9,8 +11,17 @@ from jose import jwt
 import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
-# Initialize app
+
+from pydantic import BaseModel
+from sqlalchemy import create_engine, Column, Integer, String, Boolean
+from sqlalchemy.orm import sessionmaker, Session, declarative_base
+
+# --- Config ---
+# Use an explicit path for SQLite so permission issues are easier to diagnose.
+DB_PATH = os.path.join(os.path.dirname(__file__), "tasks.db")
+SQLALCHEMY_DATABASE_URL = f"sqlite:///{DB_PATH}"
+
+# --- App & CORS ---
 app = FastAPI(title="Task Manager")
 
 # Path to frontend folder
@@ -24,14 +35,13 @@ def home():
 # Enable CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # for dev; in production restrict
+    allow_origins=["*"],  # dev only
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Database setup (SQLite for now)
-SQLALCHEMY_DATABASE_URL = "sqlite:///./tasks.db"
+# --- DB setup ---
 engine = create_engine(SQLALCHEMY_DATABASE_URL, connect_args={"check_same_thread": False})
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
@@ -43,32 +53,15 @@ def get_db():
     finally:
         db.close()
 
-# Models
-class UserDB(Base):
-    __tablename__ = "users"
-    id = Column(Integer, primary_key=True, index=True)
-    username = Column(String, unique=True, index=True)
-    password = Column(String)
-    tasks = relationship("TaskDB", back_populates="owner")
-
+# --- Models ---
 class TaskDB(Base):
     __tablename__ = "tasks"
     id = Column(Integer, primary_key=True, index=True)
-    title = Column(String, index=True)
+    title = Column(String, nullable=False, index=True)
     description = Column(String, default="")
     completed = Column(Boolean, default=False)
-    owner_id = Column(Integer, ForeignKey("users.id"))
-    owner = relationship("UserDB", back_populates="tasks")
 
-# Schemas
-class UserCreate(BaseModel):
-    username: str
-    password: str
-
-class Token(BaseModel):
-    access_token: str
-    token_type: str
-
+# --- Pydantic schemas ---
 class TaskBase(BaseModel):
     title: str
     description: str = ""
@@ -79,54 +72,25 @@ class Task(TaskBase):
     class Config:
         orm_mode = True
 
-# Security
-SECRET_KEY = "your-secret-key"
-ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 45
+# Create tables on startup
+@app.on_event("startup")
+def on_startup():
+    # ensure directory exists (only needed if using subfolders)
+    os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
+    Base.metadata.create_all(bind=engine)
 
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+# --- Routes ---
+@app.get("/")
+def home():
+    return {"msg": "Task Manager Backend is running!"}
 
-def hash_password(password: str):
-    return pwd_context.hash(password)
-
-def verify_password(plain, hashed):
-    return pwd_context.verify(plain, hashed)
-
-def create_access_token(data: dict):
-    to_encode = data.copy()
-    expire = datetime.utcnow() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
-    to_encode.update({"exp": expire})
-    return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
-
-Base.metadata.create_all(bind=engine)
-
-# Routes
-@app.post("/register")
-def register(user: UserCreate, db: Session = Depends(get_db)):
-    db_user = db.query(UserDB).filter(UserDB.username == user.username).first()
-    if db_user:
-        raise HTTPException(status_code=400, detail="Username already registered")
-    new_user = UserDB(username=user.username, password=hash_password(user.password))
-    db.add(new_user)
-    db.commit()
-    db.refresh(new_user)
-    return {"msg": "User created successfully"}
-
-@app.post("/login", response_model=Token)
-def login(user: UserCreate, db: Session = Depends(get_db)):
-    db_user = db.query(UserDB).filter(UserDB.username == user.username).first()
-    if not db_user or not verify_password(user.password, db_user.password):
-        raise HTTPException(status_code=401, detail="Invalid credentials")
-    token = create_access_token(data={"sub": db_user.username})
-    return {"access_token": token, "token_type": "bearer"}
-
-@app.get("/tasks", response_model=list[Task])
+@app.get("/tasks", response_model=List[Task])
 def get_tasks(db: Session = Depends(get_db)):
     return db.query(TaskDB).all()
 
 @app.post("/tasks", response_model=Task)
 def create_task(task: TaskBase, db: Session = Depends(get_db)):
-    new_task = TaskDB(**task.dict(), owner_id=1)  # temporary user_id
+    new_task = TaskDB(**task.dict())
     db.add(new_task)
     db.commit()
     db.refresh(new_task)
